@@ -1,0 +1,8 @@
+frontend/vue-project/node_modules
+frontend/vue-project/dist
+frontend/vue-project/.vscode
+.git
+.gitignore
+.vscode
+__pycache__
+*.pyc
