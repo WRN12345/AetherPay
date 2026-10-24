@@ -20,8 +20,8 @@ services:
   # 以下服务用于阶段 8 部署；开发阶段在本机直接运行 uvicorn、worker 和 npm run dev
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile.backend
+      context: .
+      dockerfile: backend/Dockerfile.backend
     container_name: web3-backend
     env_file:
       - backend/.env
@@ -39,8 +39,8 @@ services:
   # 阶段 5 实现 app/worker.py 后启用
   # worker:
   #   build:
-  #     context: ./backend
-  #     dockerfile: Dockerfile.backend
+  #     context: .
+  #     dockerfile: backend/Dockerfile.backend
   #   container_name: web3-worker
   #   command: ["python", "-m", "app.worker"]
   #   env_file:

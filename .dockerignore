@@ -1,8 +1,10 @@
-frontend/node_modules
-frontend/dist
-frontend/.vscode
-.git
-.gitignore
-.vscode
-__pycache__
-*.pyc
+# 后端镜像以仓库根目录为构建上下文，只放入 requirements.txt 和 backend/
+# 前端镜像的构建上下文是 frontend/，使用 frontend/.dockerignore
+*
+!requirements.txt
+!backend/
+backend/.env
+backend/tests/
+backend/.vscode/
+**/__pycache__
+**/*.pyc

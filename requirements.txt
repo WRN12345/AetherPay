@@ -1,0 +1,26 @@
+# web3 后端 Python 依赖
+# 用法（Git Bash，仓库根目录）：
+#   source .venv/Scripts/activate
+#   pip install -r requirements.txt
+#
+# 这是唯一的依赖清单，Docker 构建后端镜像时也读取本文件。
+
+# ── Web 框架 ──
+fastapi>=0.115.0            # API 框架
+uvicorn[standard]>=0.30.0   # 运行 FastAPI 的 ASGI 服务器
+
+# ── 数据校验与配置 ──
+pydantic>=2.0.0             # 请求与响应模型校验
+pydantic-settings>=2.0.0    # 从 .env 读取配置
+
+# ── 数据库 ──
+sqlalchemy>=2.0.0           # ORM 与事务
+psycopg[binary]>=3.2.0      # PostgreSQL 驱动
+alembic>=1.13.0             # 数据库迁移
+
+# ── 区块链 ──
+web3>=7.0.0,<8              # 读取区块、收据和合约事件；固定 7.x 与方案示例一致
+
+# ── 测试 ──
+pytest>=8.0.0               # 测试框架
+httpx>=0.27.0               # FastAPI TestClient 依赖

@@ -1,3 +1,4 @@
+# 构建上下文为仓库根目录（见 docker-compose.yml），以便使用根目录的 requirements.txt
 FROM python:3.14-slim
 
 WORKDIR /app
@@ -7,7 +8,7 @@ COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 复制应用代码
-COPY . /app/
+COPY backend/ /app/
 
 EXPOSE 8000
 
