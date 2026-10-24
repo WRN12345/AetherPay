@@ -1,18 +1,16 @@
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
-
 from alembic import context
 
 import app.models  # noqa: F401  导入全部模型，让 Base.metadata 包含所有表
 from app.core.config import get_settings
-from app.database import Base
+from app.database import Base, engine
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
-config.set_main_option("sqlalchemy.url", get_settings().DATABASE_URL)
+# configparser 会把 % 当作插值符号，密码转义后含 % 时需写成 %%
+config.set_main_option("sqlalchemy.url", get_settings().DATABASE_URL.replace("%", "%%"))
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
@@ -62,13 +60,8 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
-
-    with connectable.connect() as connection:
+    # 复用应用的 engine，保证编码等连接参数与应用一致
+    with engine.connect() as connection:
         context.configure(
             connection=connection, target_metadata=target_metadata
         )

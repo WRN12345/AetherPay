@@ -1,12 +1,17 @@
 """
 应用配置管理
-使用 pydantic-settings 从环境变量 / .env 文件加载配置
+使用 pydantic-settings 从环境变量 / 仓库根目录 .env 文件加载配置
 后端只读链，不需要任何私钥
 """
 
 from functools import lru_cache
+from pathlib import Path
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import URL
+
+# backend/app/core/config.py → 仓库根目录
+ROOT_DIR = Path(__file__).resolve().parents[3]
 
 
 class Settings(BaseSettings):
@@ -17,8 +22,12 @@ class Settings(BaseSettings):
     APP_VERSION: str = "0.1.0"
     DEBUG: bool = False
 
-    # ── 数据库 ──
-    DATABASE_URL: str = "postgresql+psycopg://web3_app:change_me@127.0.0.1:5432/web3_payment"
+    # ── PostgreSQL ──
+    PGSQL_HOST: str = "127.0.0.1"
+    PGSQL_PORT: int = 5432
+    PGSQL_USER: str = "web3_app"
+    PGSQL_PASSWORD: str = ""
+    PGSQL_DATABASE: str = "web3_payment"
 
     # ── 链与合约 ──
     RPC_URL: str = "http://127.0.0.1:8545"
@@ -32,10 +41,24 @@ class Settings(BaseSettings):
     SCAN_BATCH_SIZE: int = 500
     WORKER_POLL_SECONDS: int = 3
 
-    model_config = {
-        "env_file": ".env",
-        "env_file_encoding": "utf-8",
-    }
+    # 无论从哪个目录启动都读取根目录 .env；.env 中与本项目无关的变量忽略
+    model_config = SettingsConfigDict(
+        env_file=ROOT_DIR / ".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    @property
+    def DATABASE_URL(self) -> str:
+        """由 PGSQL_* 拼出 SQLAlchemy 连接串；密码中的特殊字符会被自动转义"""
+        return URL.create(
+            "postgresql+psycopg",
+            username=self.PGSQL_USER,
+            password=self.PGSQL_PASSWORD or None,
+            host=self.PGSQL_HOST,
+            port=self.PGSQL_PORT,
+            database=self.PGSQL_DATABASE,
+        ).render_as_string(hide_password=False)
 
 
 @lru_cache

@@ -6,8 +6,9 @@ services:
       POSTGRES_DB: web3_payment
       POSTGRES_USER: web3_app
       POSTGRES_PASSWORD: change_me
+    # 使用外部 PostgreSQL（.env 中的 PGSQL_HOST）时无需启动本服务
     ports:
-      # 本机若已安装 PostgreSQL 并占用 5432，可改为 "5433:5432"，同时修改 DATABASE_URL
+      # 本机若已安装 PostgreSQL 并占用 5432，可改为 "5433:5432"，同时修改 PGSQL_PORT
       - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -24,9 +25,10 @@ services:
       dockerfile: backend/Dockerfile.backend
     container_name: web3-backend
     env_file:
-      - backend/.env
+      - .env
     environment:
-      - DATABASE_URL=postgresql+psycopg://web3_app:change_me@postgres:5432/web3_payment
+      # 使用本文件中的 postgres 服务时取消注释；使用外部数据库时保持 .env 中的 PGSQL_HOST
+      # - PGSQL_HOST=postgres
       # Anvil 运行在宿主机上
       - RPC_URL=http://host.docker.internal:8545
     extra_hosts:
@@ -44,9 +46,8 @@ services:
   #   container_name: web3-worker
   #   command: ["python", "-m", "app.worker"]
   #   env_file:
-  #     - backend/.env
+  #     - .env
   #   environment:
-  #     - DATABASE_URL=postgresql+psycopg://web3_app:change_me@postgres:5432/web3_payment
   #     - RPC_URL=http://host.docker.internal:8545
   #   extra_hosts:
   #     - "host.docker.internal:host-gateway"
