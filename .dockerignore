@@ -1,6 +1,6 @@
-frontend/vue-project/node_modules
-frontend/vue-project/dist
-frontend/vue-project/.vscode
+frontend/node_modules
+frontend/dist
+frontend/.vscode
 .git
 .gitignore
 .vscode

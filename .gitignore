@@ -216,22 +216,27 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Frontend (Vue)
-frontend/vue-project/node_modules/
-frontend/vue-project/dist/
-frontend/vue-project/dist-ssr/
-frontend/vue-project/coverage/
-frontend/vue-project/.eslintcache
-frontend/vue-project/*.tsbuildinfo
-frontend/vue-project/.DS_Store
-frontend/vue-project/.idea/
-frontend/vue-project/*.suo
-frontend/vue-project/*.ntvs*
-frontend/vue-project/*.njsproj
-frontend/vue-project/*.sln
-frontend/vue-project/*.sw?
-frontend/vue-project/cypress/videos/
-frontend/vue-project/cypress/screenshots/
-frontend/vue-project/__screenshots__/
-frontend/vue-project/*.timestamp-*-*.mjs
-frontend/vue-project/.vscode/*
-!frontend/vue-project/.vscode/extensions.json
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/coverage/
+frontend/.eslintcache
+frontend/*.tsbuildinfo
+frontend/.DS_Store
+frontend/.idea/
+frontend/*.suo
+frontend/*.ntvs*
+frontend/*.njsproj
+frontend/*.sln
+frontend/*.sw?
+frontend/cypress/videos/
+frontend/cypress/screenshots/
+frontend/__screenshots__/
+frontend/*.timestamp-*-*.mjs
+frontend/.vscode/*
+!frontend/.vscode/extensions.json
+# Foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/*/31337/
+anvil-state.json

@@ -1,25 +1,70 @@
 services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: web3-postgres
+    environment:
+      POSTGRES_DB: web3_payment
+      POSTGRES_USER: web3_app
+      POSTGRES_PASSWORD: change_me
+    ports:
+      # 本机若已安装 PostgreSQL 并占用 5432，可改为 "5433:5432"，同时修改 DATABASE_URL
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U web3_app -d web3_payment"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # 以下服务用于阶段 8 部署；开发阶段在本机直接运行 uvicorn、worker 和 npm run dev
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile.backend
-    container_name: multi-agent-backend
-    ports:
-      - "8000:8000"
-    environment:
-      - OLLAMA_BASE_URL=http://host.docker.internal:11434
-      - OLLAMA_MODEL=qwen2.5
+    container_name: web3-backend
     env_file:
-      - backend/.env.example
+      - backend/.env
+    environment:
+      - DATABASE_URL=postgresql+psycopg://web3_app:change_me@postgres:5432/web3_payment
+      # Anvil 运行在宿主机上
+      - RPC_URL=http://host.docker.internal:8545
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: ["app"]
+
+  # 阶段 5 实现 app/worker.py 后启用
+  # worker:
+  #   build:
+  #     context: ./backend
+  #     dockerfile: Dockerfile.backend
+  #   container_name: web3-worker
+  #   command: ["python", "-m", "app.worker"]
+  #   env_file:
+  #     - backend/.env
+  #   environment:
+  #     - DATABASE_URL=postgresql+psycopg://web3_app:change_me@postgres:5432/web3_payment
+  #     - RPC_URL=http://host.docker.internal:8545
+  #   extra_hosts:
+  #     - "host.docker.internal:host-gateway"
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   profiles: ["app"]
 
   frontend:
     build:
-      context: ./frontend/vue-project
+      context: ./frontend
       dockerfile: Dockerfile.frontend
-    container_name: multi-agent-frontend
+    container_name: web3-frontend
     ports:
       - "8080:80"
     depends_on:
       - backend
+    profiles: ["app"]
+
+volumes:
+  postgres_data:

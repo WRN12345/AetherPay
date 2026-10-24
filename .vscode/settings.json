@@ -1,5 +1,5 @@
 {
-  "js/ts.tsdk.path": "frontend/vue-project/node_modules/typescript/lib",
+  "js/ts.tsdk.path": "frontend/node_modules/typescript/lib",
   "js/ts.tsdk.promptToUseWorkspaceVersion": true,
   "yaml.schemaStore.enable": false
 }
