@@ -76,4 +76,4 @@ python -m app.cli events              # 列出 OrderPaid 事件
 python -m app.cli exceptions          # 列出需人工处理的异常付款
 ```
 
-完整的设计、实施阶段和测试矩阵见 [实施方案](Web3链上支付与订单系统实施方案.md)。
+完整的设计、实施阶段和测试矩阵见 [实施方案](docs/Web3链上支付与订单系统实施方案.md)。
