@@ -7,6 +7,7 @@
 import argparse
 import logging
 import sys
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -38,15 +39,24 @@ class ScanSummary:
     results: dict[str, int] = field(default_factory=dict)
 
 
+def _cursor_query():
+    settings = get_settings()
+    return select(ScanCursor).where(
+        ScanCursor.chain_id == settings.CHAIN_ID,
+        ScanCursor.contract_address == settings.CONTRACT_ADDRESS.lower(),
+    )
+
+
+def get_cursor(db: Session) -> ScanCursor | None:
+    """只读查询当前合约的扫描游标，不加锁；尚未扫描过时返回 None"""
+    return db.scalar(_cursor_query())
+
+
 def get_or_create_cursor(db: Session) -> ScanCursor:
     """读取并锁住当前合约的扫描游标，不存在时创建"""
     settings = get_settings()
     contract_address = settings.CONTRACT_ADDRESS.lower()
-    cursor = db.scalar(
-        select(ScanCursor)
-        .where(ScanCursor.chain_id == settings.CHAIN_ID, ScanCursor.contract_address == contract_address)
-        .with_for_update()
-    )
+    cursor = db.scalar(_cursor_query().with_for_update())
     if cursor is None:
         # 游标记录"已处理完的最后一个区块"，从部署区块开始扫描，所以初始值为部署区块减 1
         cursor = ScanCursor(
@@ -118,26 +128,44 @@ def scan_once(db: Session) -> ScanSummary:
 
     cursor = get_or_create_cursor(db)
     # 只处理达到确认要求的区块
-    safe_head = w3.eth.block_number - (settings.REQUIRED_CONFIRMATIONS - 1)
+    latest_block = w3.eth.block_number
+    safe_head = latest_block - (settings.REQUIRED_CONFIRMATIONS - 1)
     summary = ScanSummary(from_block=cursor.last_scanned_block + 1, to_block=cursor.last_scanned_block)
+    if latest_block < cursor.last_scanned_block:
+        logger.warning(
+            "chain_behind_cursor latest_block=%d last_scanned_block=%d 链可能已被重置，需重新部署合约并清空数据库",
+            latest_block,
+            cursor.last_scanned_block,
+        )
 
     from_block = cursor.last_scanned_block + 1
     while from_block <= safe_head:
+        started = time.monotonic()
         to_block = min(from_block + settings.SCAN_BATCH_SIZE - 1, safe_head)
         events = fetch_paid_events(from_block, to_block)
 
+        batch_results: dict[str, int] = {}
         for event in events:
             result = record_payment(db, event)
             summary.events += 1
             if result is None:
                 summary.skipped += 1
             else:
+                batch_results[result.value] = batch_results.get(result.value, 0) + 1
                 summary.results[result.value] = summary.results.get(result.value, 0) + 1
 
         cursor.last_scanned_block = to_block
         cursor.last_scanned_block_time = datetime.fromtimestamp(w3.eth.get_block(to_block)["timestamp"], tz=UTC)
         db.commit()
-        logger.info("已扫描区块 %d 至 %d，事件 %d 条", from_block, to_block, len(events))
+        # 结构化日志：固定的 key=value 字段，便于检索和统计
+        logger.info(
+            "scan_batch from_block=%d to_block=%d events=%d results=%s elapsed_ms=%d",
+            from_block,
+            to_block,
+            len(events),
+            batch_results,
+            (time.monotonic() - started) * 1000,
+        )
 
         summary.to_block = to_block
         from_block = to_block + 1

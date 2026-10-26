@@ -11,7 +11,8 @@ from app.api.v1.config import router as config_router
 from app.api.v1.orders import router as orders_router
 from app.api.v1.products import router as products_router
 from app.core.config import get_settings
-from app.database import engine
+from app.database import SessionLocal, engine
+from app.jobs.scan_payments import get_cursor
 from app.services.chain import get_web3
 
 logging.basicConfig(
@@ -37,7 +38,7 @@ app.include_router(orders_router, prefix="/api/v1")
 
 @app.get("/health")
 def health_check() -> dict:
-    """健康检查：数据库与 RPC 连通性"""
+    """健康检查：数据库、RPC 连通性，以及扫描进度落后多少区块"""
     result: dict = {"app": settings.APP_NAME, "version": settings.APP_VERSION}
 
     try:
@@ -47,11 +48,39 @@ def health_check() -> dict:
     except Exception as exc:
         result["database"] = f"error: {type(exc).__name__}"
 
+    latest_block: int | None = None
     try:
-        chain_id = get_web3().eth.chain_id
+        w3 = get_web3()
+        chain_id = w3.eth.chain_id
+        latest_block = w3.eth.block_number
         result["rpc"] = "ok" if chain_id == settings.CHAIN_ID else f"chain_id mismatch: {chain_id}"
     except Exception as exc:
         result["rpc"] = f"error: {type(exc).__name__}"
 
-    result["status"] = "ok" if result["database"] == "ok" and result["rpc"] == "ok" else "degraded"
+    result["scanner"] = _scanner_status(latest_block) if result["database"] == "ok" else {"status": "unknown"}
+
+    healthy = result["database"] == "ok" and result["rpc"] == "ok" and result["scanner"]["status"] == "ok"
+    result["status"] = "ok" if healthy else "degraded"
     return result
+
+
+def _scanner_status(latest_block: int | None) -> dict:
+    """扫描进度：Worker 停止或卡住时，落后区块数会持续增大"""
+    with SessionLocal() as db:
+        cursor = get_cursor(db)
+    if cursor is None:
+        return {"status": "not_started"}
+    status: dict = {"last_scanned_block": cursor.last_scanned_block}
+    if latest_block is None:
+        status["status"] = "unknown"
+        return status
+    lag = latest_block - cursor.last_scanned_block
+    status["latest_block"] = latest_block
+    status["lag_blocks"] = lag
+    if lag < 0:
+        # 链上区块比已扫描的还少：本地 Anvil 被重启后链已重置，数据库仍停留在旧链
+        status["status"] = "chain_reset"
+        status["hint"] = "链上最新区块低于扫描进度，链可能已被重置；需重新部署合约并清空数据库"
+    else:
+        status["status"] = "ok" if lag <= settings.HEALTH_MAX_SCAN_LAG_BLOCKS else "lagging"
+    return status

@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     ORDER_TTL_SECONDS: int = 1800
     SCAN_BATCH_SIZE: int = 500
     WORKER_POLL_SECONDS: int = 3
+    # 连续失败时重试间隔翻倍，最长不超过该值
+    WORKER_MAX_BACKOFF_SECONDS: int = 60
+    # 扫描进度落后最新区块超过该值时，/health 报告 lagging
+    HEALTH_MAX_SCAN_LAG_BLOCKS: int = 20
 
     # 无论从哪个目录启动都读取根目录 .env；.env 中与本项目无关的变量忽略
     model_config = SettingsConfigDict(
