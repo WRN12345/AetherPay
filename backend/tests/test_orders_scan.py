@@ -3,10 +3,12 @@
 数据库隔离方式和假链见 conftest.py
 """
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.jobs import scan_payments
 from app.models import Payment, ScanCursor
 from app.services import orders as order_service
@@ -116,3 +118,22 @@ def test_cursor_advances_to_safe_head(db_session: Session, fake_chain: FakeChain
     # 没有新区块时再扫描，不做任何事
     summary = scan_payments.scan_once(db_session)
     assert summary.to_block < summary.from_block
+
+
+def test_finalized_tag_limits_scan_head(
+    db_session: Session, fake_chain: FakeChain, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """公共网络使用 finalized：只处理已最终确定的区块，更新的区块即使有付款也暂不处理"""
+    monkeypatch.setattr(get_settings(), "SCAN_BLOCK_TAG", "finalized")
+    order = order_service.create_order(db_session, "lesson17")
+    fake_chain.events.append(make_event(order.chain_order_id, block=7))  # 最新区块 10，最终区块 4
+
+    scan_payments.scan_once(db_session)
+    db_session.refresh(order)
+    assert db_session.scalar(select(ScanCursor)).last_scanned_block == 4
+    assert order.status == "PENDING_PAYMENT"
+
+    fake_chain.finalized_block = 8  # 区块 7 被最终确定
+    scan_payments.scan_once(db_session)
+    db_session.refresh(order)
+    assert order.status == "PAID"

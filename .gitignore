@@ -149,6 +149,9 @@ activemq-data/
 
 # Environments
 .env
+# 其他环境的真实配置（如 .env.sepolia）同样不提交，只提交 *.example 模板
+.env.*
+!.env*.example
 .envrc
 .venv
 env/

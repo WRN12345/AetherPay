@@ -121,15 +121,26 @@ def record_payment(db: Session, event: PaidEvent) -> PaymentResult | None:
     return result
 
 
+def scan_head(w3) -> int:
+    """
+    扫描上限：只处理不超过这个区块号的区块
+    - latest：最新区块减去 (REQUIRED_CONFIRMATIONS - 1)，本地 Anvil 使用
+    - safe / finalized：由节点按共识给出，finalized 区块在正常情况下不会再被替换，公共网络推荐使用
+    """
+    settings = get_settings()
+    if settings.SCAN_BLOCK_TAG == "latest":
+        return w3.eth.block_number - (settings.REQUIRED_CONFIRMATIONS - 1)
+    return w3.eth.get_block(settings.SCAN_BLOCK_TAG)["number"]
+
+
 def scan_once(db: Session) -> ScanSummary:
-    """从游标扫描到当前确认区块；每批的付款记录与游标推进在同一事务中提交"""
+    """从游标扫描到当前扫描上限；每批的付款记录与游标推进在同一事务中提交"""
     settings = get_settings()
     w3 = get_web3()
 
     cursor = get_or_create_cursor(db)
-    # 只处理达到确认要求的区块
     latest_block = w3.eth.block_number
-    safe_head = latest_block - (settings.REQUIRED_CONFIRMATIONS - 1)
+    safe_head = scan_head(w3)
     summary = ScanSummary(from_block=cursor.last_scanned_block + 1, to_block=cursor.last_scanned_block)
     if latest_block < cursor.last_scanned_block:
         logger.warning(

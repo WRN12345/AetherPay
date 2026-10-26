@@ -49,17 +49,20 @@ def test_concurrent_same_key_resolved_by_unique_constraint(
     db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """模拟两个相同键的请求同时到达：后到的请求查询时还看不到先到的订单，插入时撞上唯一约束"""
-    first = order_service.create_order(db_session, "lesson17", "key-3")
+    # 必须带所有者：唯一约束是 (owner_address, idempotency_key)，PostgreSQL 视 NULL 为互不相同，
+    # 所有者为空时约束不生效；通过 API 创建的订单都有所有者
+    owner = "0x70997970c51812dc3a010c7d01b50e0d17dc79c8"
+    first = order_service.create_order(db_session, "lesson17", "key-3", owner_address=owner)
 
     real_find = order_service.find_by_idempotency_key
     calls = {"n": 0}
 
-    def stale_then_real(db: Session, key: str):
+    def stale_then_real(db: Session, owner: str | None, key: str):
         calls["n"] += 1
-        return None if calls["n"] == 1 else real_find(db, key)
+        return None if calls["n"] == 1 else real_find(db, owner, key)
 
     monkeypatch.setattr(order_service, "find_by_idempotency_key", stale_then_real)
-    second = order_service.create_order(db_session, "lesson17", "key-3")
+    second = order_service.create_order(db_session, "lesson17", "key-3", owner_address=owner)
 
     assert second.id == first.id
     assert len(db_session.scalars(select(Order).where(Order.idempotency_key == "key-3")).all()) == 1

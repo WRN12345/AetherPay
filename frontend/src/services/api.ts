@@ -1,5 +1,14 @@
-// 后端 API 客户端；开发时 Vite 把 /api 代理到 FastAPI
+// 后端 API 客户端；开发时 Vite 把 /api 代理到 FastAPI。同源请求会自动携带登录 Cookie
 import type { Order, Product, PublicConfig } from '../types'
+
+export class ApiError extends Error {
+  readonly status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.status = status
+  }
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api/v1${path}`, {
@@ -14,25 +23,44 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       // 响应不是 JSON 时保留状态文本
     }
-    throw new Error(`请求失败（${res.status}）：${detail}`)
+    throw new ApiError(detail, res.status)
   }
+  if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
 }
+
+const post = (body: unknown, headers?: Record<string, string>): RequestInit => ({
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', ...headers },
+  body: JSON.stringify(body),
+})
 
 export const getConfig = () => request<PublicConfig>('/config')
 
 export const getProducts = () => request<Product[]>('/products')
 
+// ── 钱包签名登录 ──
+
+export const createChallenge = (address: string, chainId: number) =>
+  request<{ nonce: string; message: string }>('/auth/challenge', post({ address, chain_id: chainId }))
+
+export const login = (nonce: string, signature: string) =>
+  request<{ address: string }>('/auth/login', post({ nonce, signature }))
+
+export const getMe = () => request<{ address: string }>('/auth/me')
+
+export const logout = () => request<void>('/auth/logout', { method: 'POST' })
+
+// ── 订单（需要登录）──
+
 // 幂等键：同一次购买的重试必须带同一个键，后端会返回第一次创建的订单
 export const createOrder = (productId: string, idempotencyKey: string) =>
-  request<Order>('/orders', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
-    body: JSON.stringify({ product_id: productId }),
-  })
+  request<Order>('/orders', post({ product_id: productId }, { 'Idempotency-Key': idempotencyKey }))
+
+export const listOrders = () => request<Order[]>('/orders')
 
 export const getOrder = (orderId: string) => request<Order>(`/orders/${orderId}`)
 
 // 只是把交易哈希交给后端记录，订单状态仍由后台扫描器确认
 export const submitTxHash = (orderId: string, txHash: string) =>
-  request<Order>(`/orders/${orderId}/tx-hash`, { method: 'POST', body: JSON.stringify({ tx_hash: txHash }) })
+  request<Order>(`/orders/${orderId}/tx-hash`, post({ tx_hash: txHash }))

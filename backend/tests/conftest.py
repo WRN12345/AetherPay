@@ -9,12 +9,15 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_current_address
 from app.database import Base, engine, get_db
 from app.jobs import scan_payments
 from app.main import app
 from app.services.payments import PaidEvent
+from app.services.rate_limit import order_create_limiter
 
 PRICE = 10**16  # 0.01 ETH
+USER_ADDRESS = "0x70997970c51812dc3a010c7d01b50e0d17dc79c8"
 
 
 @pytest.fixture
@@ -50,14 +53,26 @@ def db_session() -> Iterator[Session]:
         connection.close()
 
 
+@pytest.fixture(autouse=True)
+def _reset_rate_limit() -> None:
+    order_create_limiter.reset()
+
+
 @pytest.fixture
-def api(db_session: Session) -> Iterator[TestClient]:
-    """使用隔离数据库会话的测试客户端"""
+def anon_api(db_session: Session) -> Iterator[TestClient]:
+    """未登录的测试客户端，使用隔离数据库会话；登录测试从这里走完整的签名流程"""
     app.dependency_overrides[get_db] = lambda: db_session
     try:
         yield TestClient(app)
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def api(anon_api: TestClient) -> TestClient:
+    """以 USER_ADDRESS 身份"已登录"的测试客户端，跳过签名流程，供订单相关测试使用"""
+    app.dependency_overrides[get_current_address] = lambda: USER_ADDRESS
+    return anon_api
 
 
 # ───────────────────────── 假链 ─────────────────────────
@@ -71,8 +86,11 @@ class FakeEth:
     def block_number(self) -> int:
         return self._chain.block_number
 
-    def get_block(self, number: int) -> dict:
-        return {"timestamp": int(self._chain.block_times.get(number, self._chain.default_time).timestamp())}
+    def get_block(self, block: int | str) -> dict:
+        # 支持 "safe" / "finalized" 等区块标签
+        number = self._chain.finalized_block if isinstance(block, str) else block
+        timestamp = self._chain.block_times.get(number, self._chain.default_time).timestamp()
+        return {"number": number, "timestamp": int(timestamp)}
 
 
 class FakeChain:
@@ -80,6 +98,7 @@ class FakeChain:
 
     def __init__(self) -> None:
         self.block_number = 10
+        self.finalized_block = 4
         self.default_time = datetime.now(UTC)
         self.block_times: dict[int, datetime] = {}
         self.events: list[PaidEvent] = []

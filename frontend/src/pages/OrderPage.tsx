@@ -2,7 +2,7 @@ import { formatEther } from 'ethers'
 import { useEffect, useState } from 'react'
 import { PaymentStatus, type PayStep } from '../components/PaymentStatus'
 import type { Wallet } from '../hooks/useWallet'
-import { getOrder, submitTxHash } from '../services/api'
+import { ApiError, getOrder, submitTxHash } from '../services/api'
 import { explainError, sendPayment } from '../services/payment'
 import type { Order } from '../types'
 
@@ -42,6 +42,16 @@ export function OrderPage({ orderId, wallet, onBack }: Props) {
         if (o.status === 'PENDING_PAYMENT') timer = setTimeout(load, POLL_MS)
       } catch (e) {
         if (cancelled) return
+        if (e instanceof ApiError && e.status === 404) {
+          // 订单不存在，或属于其他账户（后端对两者返回相同结果），不再重试
+          setLoadError('订单不存在，或不属于当前登录账户')
+          return
+        }
+        if (e instanceof ApiError && e.status === 401) {
+          setLoadError('登录已过期，请重新签名登录')
+          return
+        }
+        // 网络或服务暂时不可用：稍后重试
         setLoadError((e as Error).message)
         timer = setTimeout(load, POLL_MS * 3)
       }

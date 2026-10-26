@@ -8,6 +8,7 @@
 
 import argparse
 import sys
+from urllib.parse import urlsplit
 
 from sqlalchemy import select, text
 from web3 import Web3
@@ -25,6 +26,12 @@ ANVIL_ACCOUNTS = {
 }
 
 
+def _redact_url(url: str) -> str:
+    """只显示协议、主机和端口：服务商的 RPC 地址路径中通常带有 API 密钥"""
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc.rsplit('@', 1)[-1]}" + ("/***" if parts.path.strip("/") else "")
+
+
 def cmd_check(_: argparse.Namespace) -> int:
     settings = get_settings()
     w3 = get_web3()
@@ -36,7 +43,7 @@ def cmd_check(_: argparse.Namespace) -> int:
     except Exception as exc:
         print(f"数据库    失败  {type(exc).__name__}: {exc}")
 
-    print(f"节点      {settings.RPC_URL}  链 ID {w3.eth.chain_id}  最新区块 {w3.eth.block_number}")
+    print(f"节点      {_redact_url(settings.RPC_URL)}  链 ID {w3.eth.chain_id}  最新区块 {w3.eth.block_number}")
     for label, address in ANVIL_ACCOUNTS.items():
         print(f"余额      {label} {address}  {Web3.from_wei(w3.eth.get_balance(address), 'ether')} ETH")
 

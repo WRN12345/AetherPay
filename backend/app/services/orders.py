@@ -23,8 +23,9 @@ class IdempotencyConflictError(Exception):
     """同一幂等键被用于内容不同的请求"""
 
 
-def find_by_idempotency_key(db: Session, key: str) -> Order | None:
-    return db.scalar(select(Order).where(Order.idempotency_key == key))
+def find_by_idempotency_key(db: Session, owner_address: str | None, key: str) -> Order | None:
+    """幂等键按账户隔离，只在同一账户的订单中查找"""
+    return db.scalar(select(Order).where(Order.owner_address == owner_address, Order.idempotency_key == key))
 
 
 def _replay(existing: Order, product_id: str) -> Order:
@@ -34,7 +35,12 @@ def _replay(existing: Order, product_id: str) -> Order:
     return existing
 
 
-def create_order(db: Session, product_id: str, idempotency_key: str | None = None) -> Order:
+def create_order(
+    db: Session,
+    product_id: str,
+    idempotency_key: str | None = None,
+    owner_address: str | None = None,
+) -> Order:
     """
     创建订单。带幂等键时，相同键 + 相同内容返回同一个订单，相同键 + 不同内容抛出冲突
     用于用户连点、网络超时后重试等场景，避免生成多个订单
@@ -44,7 +50,7 @@ def create_order(db: Session, product_id: str, idempotency_key: str | None = Non
         raise UnknownProductError(product_id)
 
     if idempotency_key is not None:
-        existing = find_by_idempotency_key(db, idempotency_key)
+        existing = find_by_idempotency_key(db, owner_address, idempotency_key)
         if existing is not None:
             return _replay(existing, product_id)
 
@@ -54,6 +60,7 @@ def create_order(db: Session, product_id: str, idempotency_key: str | None = Non
         product_id=product.id,
         amount_wei=product.price_wei,
         status=STATUS_PENDING_PAYMENT,
+        owner_address=owner_address,
         idempotency_key=idempotency_key,
         expires_at=datetime.now(UTC) + timedelta(seconds=get_settings().ORDER_TTL_SECONDS),
     )
@@ -63,7 +70,7 @@ def create_order(db: Session, product_id: str, idempotency_key: str | None = Non
     except IntegrityError:
         # 两个相同键的请求同时到达：上面的查询都没查到，后提交的一方撞上唯一约束
         db.rollback()
-        existing = find_by_idempotency_key(db, idempotency_key) if idempotency_key else None
+        existing = find_by_idempotency_key(db, owner_address, idempotency_key) if idempotency_key else None
         if existing is None:
             raise
         return _replay(existing, product_id)
@@ -73,6 +80,22 @@ def create_order(db: Session, product_id: str, idempotency_key: str | None = Non
 
 def get_order(db: Session, order_id: uuid.UUID) -> Order | None:
     return db.get(Order, order_id)
+
+
+def get_owned_order(db: Session, order_id: uuid.UUID, owner_address: str) -> Order | None:
+    """只返回属于该账户的订单；他人的订单与不存在的订单一样返回 None"""
+    order = db.get(Order, order_id)
+    if order is None or order.owner_address != owner_address:
+        return None
+    return order
+
+
+def list_orders(db: Session, owner_address: str, limit: int = 20) -> list[Order]:
+    return list(
+        db.scalars(
+            select(Order).where(Order.owner_address == owner_address).order_by(Order.created_at.desc()).limit(limit)
+        )
+    )
 
 
 def record_submitted_tx(db: Session, order: Order, tx_hash: str) -> Order:

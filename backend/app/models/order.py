@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, DateTime, Index, Numeric, String, Uuid, func
+from sqlalchemy import CheckConstraint, DateTime, Index, Numeric, String, UniqueConstraint, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -22,6 +22,9 @@ class Order(Base):
         CheckConstraint(f"status IN {ORDER_STATUSES}", name="ck_orders_status"),
         CheckConstraint("amount_wei > 0", name="ck_orders_amount_positive"),
         Index("ix_orders_status_expires_at", "status", "expires_at"),
+        # 幂等键按账户隔离：不同账户可以碰巧用同一个键，但不会拿到别人的订单
+        UniqueConstraint("owner_address", "idempotency_key", name="uq_orders_owner_idempotency_key"),
+        Index("ix_orders_owner_created_at", "owner_address", "created_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -31,7 +34,9 @@ class Order(Base):
     # NUMERIC(78,0) 能容纳 uint256；SQLAlchemy 返回 Decimal，业务代码中用 int() 转换
     amount_wei: Mapped[Decimal] = mapped_column(Numeric(78, 0))
     status: Mapped[str] = mapped_column(String(32), default=STATUS_PENDING_PAYMENT)
-    idempotency_key: Mapped[str | None] = mapped_column(String(128), unique=True)
+    # 创建订单的登录账户（小写地址），只有本人能查看订单；付款人不必是同一账户
+    owner_address: Mapped[str | None] = mapped_column(String(42))
+    idempotency_key: Mapped[str | None] = mapped_column(String(128))
 
     # 前端提交的最近一个交易哈希，只用于展示和排查，不影响状态
     submitted_tx_hash: Mapped[str | None] = mapped_column(String(66))

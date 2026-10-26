@@ -415,7 +415,8 @@ Worker 只运行一个实例。暂不引入 Redis、Celery 或多实例调度。
 2. 创建订单时绑定已认证钱包；查询订单时检查访问权限。创建订单接口加限频。
 3. 准备测试网环境：在 RPC 服务商处申请 Sepolia 节点地址，通过水龙头领取测试 ETH，部署者账户使用新生成的私钥，不使用任何 Anvil 默认私钥。
 4. 为测试网单独部署合约，配置独立的 RPC、chain_id、合约地址和部署区块，并在区块浏览器上验证合约源码。
-5. 修改确认策略：教学演示可以使用较小的确认数，正式业务按金额使用 finalized 区块标签。免费节点通常限制 get_logs 的区块范围，按节点限制调整 SCAN_BATCH_SIZE。
+   注意：forge script 先按本地 EVM 规则模拟并估算 Gas，再乘以 1.3 作为 Gas 上限。公共网络升级后 Gas 计价可能与本地不同（实测 Sepolia 部署本合约需约 378 万 Gas，本地估算只有 57 万），上限不足时交易会在链上耗尽 Gas 而失败。部署前先用 cast estimate --from 部署者地址 --rpc-url 测试网 --create 字节码 查询节点的实际估算，再通过 --gas-estimate-multiplier 调大倍数。
+5. 修改确认策略：设置 SCAN_BLOCK_TAG=finalized，扫描器只处理已最终确定的区块；想更快看到结果可用 safe。/health 的落后区块数相对扫描上限计算，不会因 finalized 本身的延迟误报。免费节点通常限制 get_logs 的区块范围，按节点限制调整 SCAN_BATCH_SIZE。
 6. 构建 React 静态资源，反向代理统一提供网页与 API，并启用 HTTPS。
 7. API 与 Worker 分开运行，增加日志、健康检查、数据库备份和异常告警。
 
@@ -701,12 +702,15 @@ web3/
 │   │   ├── database.py             已有：engine、Session、Base、get_db
 │   │   ├── core/config.py          已有：从根目录 .env 读取全部配置，由 PGSQL_* 拼出连接串
 │   │   ├── api/v1/
+│   │   │   ├── auth.py             已有：钱包签名登录 challenge、login、me、logout
 │   │   │   ├── config.py           已有：GET /api/v1/config
 │   │   │   ├── products.py         已有：GET /api/v1/products
-│   │   │   └── orders.py           已有：创建、查询订单，记录交易哈希
-│   │   ├── models/                 已有：orders、payments、scan_cursors
+│   │   │   └── orders.py           已有：创建、列表、查询订单，记录交易哈希；需登录且只能访问自己的订单
+│   │   ├── models/                 已有：orders、payments、scan_cursors、auth_challenges、auth_sessions
 │   │   ├── schemas/                已有：order.py 请求与响应模型
 │   │   ├── services/
+│   │   │   ├── auth.py             已有：生成 EIP-4361 登录消息、验证签名、会话
+│   │   │   ├── rate_limit.py       已有：进程内限频
 │   │   │   ├── chain.py            已有：web3 连接、合约对象、部署检查
 │   │   │   ├── orders.py           已有：订单业务
 │   │   │   ├── products.py         已有：商品与服务端定价
@@ -725,8 +729,9 @@ web3/
 │   ├── src/
 │   │   ├── App.tsx                 已有：页面切换，订单号保存在 URL
 │   │   ├── pages/                  已有：ProductPage、OrderPage
-│   │   ├── components/             已有：WalletConnect、PaymentStatus
+│   │   ├── components/             已有：WalletConnect、AuthStatus、PaymentStatus、MyOrders
 │   │   ├── hooks/useWallet.ts      已有：钱包账户与网络状态
+│   │   ├── hooks/useAuth.ts        已有：签名登录与会话状态
 │   │   ├── services/api.ts         已有：后端 API 客户端
 │   │   ├── services/payment.ts     已有：调用 pay 与错误提示
 │   │   └── abi/Payment.json        已有：由 scripts/export_abi.py 导出
@@ -764,7 +769,9 @@ SCAN_BATCH_SIZE=500
 WORKER_POLL_SECONDS=3
 ```
 
-密码中含 @、% 等特殊字符时无需手动转义，config.py 会自动处理。部署者私钥只在执行 forge script 和 cast 提现时通过终端环境变量提供，不写入任何配置文件，也不提交到仓库。
+密码中含 @、% 等特殊字符时无需手动转义，config.py 会自动处理。
+
+切换到其他环境时，用环境变量 APP_ENV_FILE 指定配置文件，例如 APP_ENV_FILE=.env.sepolia。.env.sepolia.example 是 Sepolia 测试网的模板：独立数据库、SCAN_BLOCK_TAG=finalized、轮询间隔 12 秒。除 *.example 模板外，所有 .env 文件都不提交。部署者私钥只在执行 forge script 和 cast 提现时通过终端环境变量提供，不写入任何配置文件，也不提交到仓库。
 
 ### 9.3 运行
 
