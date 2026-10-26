@@ -236,6 +236,8 @@ frontend/*.timestamp-*-*.mjs
 frontend/.vscode/*
 !frontend/.vscode/extensions.json
 # Foundry
+# 根目录的 Python 规则 lib/ 会误伤合约依赖目录，这里取消忽略（依赖以 git 子模块形式提交）
+!contracts/lib/
 contracts/out/
 contracts/cache/
 contracts/broadcast/*/31337/
