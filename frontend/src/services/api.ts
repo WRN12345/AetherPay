@@ -23,8 +23,13 @@ export const getConfig = () => request<PublicConfig>('/config')
 
 export const getProducts = () => request<Product[]>('/products')
 
-export const createOrder = (productId: string) =>
-  request<Order>('/orders', { method: 'POST', body: JSON.stringify({ product_id: productId }) })
+// 幂等键：同一次购买的重试必须带同一个键，后端会返回第一次创建的订单
+export const createOrder = (productId: string, idempotencyKey: string) =>
+  request<Order>('/orders', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify({ product_id: productId }),
+  })
 
 export const getOrder = (orderId: string) => request<Order>(`/orders/${orderId}`)
 

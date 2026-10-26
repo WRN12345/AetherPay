@@ -371,7 +371,7 @@ Worker 只运行一个实例。暂不引入 Redis、Celery 或多实例调度。
 2. payments 表以 (tx_hash, log_index) 唯一，重复扫描相同区块时直接跳过已存在的事件。
 3. 用部分唯一索引保证每个订单最多一条 ACCEPTED 付款记录。
 4. 订单状态更新使用条件更新：只有状态为 PENDING_PAYMENT 或 EXPIRED 时才能改为 PAID。
-5. 完整实现 7.2 节的异常付款分类，提供查询异常付款的脚本，供人工退款处理。
+5. 完整实现 7.2 节的异常付款分类，提供查询异常付款的命令 python -m app.cli exceptions，供人工退款处理。
 6. 编写集成测试，覆盖第 10 节中阶段 5 和阶段 6 的场景。
 
 如果后续增加资料发放或通知，使用独立履约状态和数据库 Outbox，让入账与待履约任务在同一事务中保存；外部动作也必须有幂等键。
@@ -715,10 +715,10 @@ web3/
 │   │   │   ├── scan_payments.py    已有：scan_once 与 --once 命令
 │   │   │   └── expire_orders.py    已有：到期处理与 --once 命令
 │   │   ├── worker.py               已有：扫描、到期处理、退避重试
-│   │   └── cli.py                  已有：链上调试命令 check、verify、events
+│   │   └── cli.py                  已有：调试命令 check、verify、events、exceptions
 │   ├── alembic/                    已有：初始迁移建立三张表
 │   ├── abi/Payment.json            已有：由 scripts/export_abi.py 导出
-│   ├── tests/                      已有：配置、付款分类、订单接口与扫描测试
+│   ├── tests/                      已有：付款分类、订单与扫描、到期与重试、幂等与约束测试
 │   ├── alembic.ini                 已有
 │   └── Dockerfile.backend          已有
 ├── frontend/                       已有：React + TypeScript + Vite，已安装 ethers v6

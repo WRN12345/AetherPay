@@ -1,5 +1,5 @@
 import { formatEther } from 'ethers'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createOrder, getProducts } from '../services/api'
 import type { Product } from '../types'
 
@@ -11,6 +11,8 @@ export function ProductPage({ onOrderCreated }: Props) {
   const [products, setProducts] = useState<Product[]>([])
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState<string | null>(null)
+  // 尚未成功的购买尝试所用的幂等键；请求失败后重试时复用，成功后丢弃
+  const pendingKeys = useRef<Record<string, string>>({})
 
   useEffect(() => {
     getProducts().then(setProducts).catch((e: Error) => setError(e.message))
@@ -19,11 +21,14 @@ export function ProductPage({ onOrderCreated }: Props) {
   async function buy(productId: string) {
     setError(null)
     setCreating(productId)
+    const key = (pendingKeys.current[productId] ??= crypto.randomUUID())
     try {
-      const order = await createOrder(productId)
+      const order = await createOrder(productId, key)
+      delete pendingKeys.current[productId]
       onOrderCreated(order.order_id)
     } catch (e) {
-      setError((e as Error).message)
+      // 请求可能已在后端成功、只是响应丢失；保留键，重试时拿回同一个订单
+      setError(`${(e as Error).message}，可以重试`)
     } finally {
       setCreating(null)
     }

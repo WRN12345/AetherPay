@@ -3,18 +3,20 @@
   python -m app.cli check                     检查数据库、节点和合约部署
   python -m app.cli verify <交易哈希>          核验一笔交易是否为有效付款
   python -m app.cli events [--from N] [--to N] 列出区块范围内的 OrderPaid 事件
+  python -m app.cli exceptions                列出需人工处理的异常付款
 """
 
 import argparse
 import sys
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from web3 import Web3
 
 from app.core.config import get_settings
-from app.database import engine
+from app.database import SessionLocal, engine
+from app.models import Payment
 from app.services.chain import check_deployment, get_web3
-from app.services.payments import fetch_paid_events, verify_payment_tx
+from app.services.payments import PaymentResult, fetch_paid_events, verify_payment_tx
 
 # Anvil 默认账户 (0) 和 (1)，仅用于本地显示余额
 ANVIL_ACCOUNTS = {
@@ -77,6 +79,36 @@ def cmd_events(args: argparse.Namespace) -> int:
     return 0
 
 
+EXCEPTION_HINTS = {
+    "AMOUNT_MISMATCH": "金额与订单不符，核对后退款",
+    "LATE": "订单到期后才付款，退款或人工补单",
+    "DUPLICATE": "订单已付过款，退还重复的这笔",
+    "UNKNOWN_ORDER": "找不到对应订单，联系付款人确认",
+}
+
+
+def cmd_exceptions(_: argparse.Namespace) -> int:
+    with SessionLocal() as db:
+        rows = db.scalars(
+            select(Payment).where(Payment.result != PaymentResult.ACCEPTED.value).order_by(Payment.block_number)
+        ).all()
+
+    if not rows:
+        print("没有异常付款")
+        return 0
+
+    total = sum(int(p.amount_wei) for p in rows)
+    print(f"共 {len(rows)} 笔异常付款，合计 {Web3.from_wei(total, 'ether')} ETH，需人工处理：")
+    for p in rows:
+        print()
+        print(f"分类      {p.result}（{EXCEPTION_HINTS.get(p.result, '')}）")
+        print(f"订单      {p.order_id or '无'}  链上编号 {p.chain_order_id}")
+        print(f"付款人    {p.payer_address}")
+        print(f"金额      {Web3.from_wei(int(p.amount_wei), 'ether')} ETH")
+        print(f"交易      {p.tx_hash}  区块 {p.block_number}  {p.block_time.isoformat()}")
+    return 0
+
+
 def main() -> int:
     # Git Bash 中 Windows 版 Python 默认按 GBK 输出，中文会乱码
     sys.stdout.reconfigure(encoding="utf-8")
@@ -94,6 +126,8 @@ def main() -> int:
     p_events.add_argument("--from", dest="from_block", type=int)
     p_events.add_argument("--to", dest="to_block", type=int)
     p_events.set_defaults(func=cmd_events)
+
+    sub.add_parser("exceptions", help="列出需人工处理的异常付款").set_defaults(func=cmd_exceptions)
 
     args = parser.parse_args()
     return args.func(args)

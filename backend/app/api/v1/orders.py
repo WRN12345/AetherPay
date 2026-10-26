@@ -2,7 +2,7 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -21,12 +21,21 @@ def _get_order_or_404(db: Session, order_id: uuid.UUID) -> Order:
 
 
 @router.post("", response_model=OrderOut, status_code=status.HTTP_201_CREATED)
-def create_order(body: OrderCreate, db: Session = Depends(get_db)) -> OrderOut:
-    """创建订单，价格由服务端商品配置决定"""
+def create_order(
+    body: OrderCreate,
+    db: Session = Depends(get_db),
+    idempotency_key: str | None = Header(default=None, min_length=1, max_length=128),
+) -> OrderOut:
+    """
+    创建订单，价格由服务端商品配置决定
+    请求头 Idempotency-Key 可选：重试时带上同一个键，返回的是第一次创建的订单
+    """
     try:
-        order = order_service.create_order(db, body.product_id)
+        order = order_service.create_order(db, body.product_id, idempotency_key)
     except order_service.UnknownProductError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="商品不存在")
+    except order_service.IdempotencyConflictError:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该幂等键已用于内容不同的请求")
     return order_service.to_order_out(order)
 
 
