@@ -8,6 +8,8 @@ from fastapi import FastAPI
 from sqlalchemy import text
 
 from app.api.v1.config import router as config_router
+from app.api.v1.orders import router as orders_router
+from app.api.v1.products import router as products_router
 from app.core.config import get_settings
 from app.database import engine
 from app.services.chain import get_web3
@@ -29,6 +31,8 @@ app = FastAPI(
 
 # 注册路由
 app.include_router(config_router, prefix="/api/v1")
+app.include_router(products_router, prefix="/api/v1")
+app.include_router(orders_router, prefix="/api/v1")
 
 
 @app.get("/health")

@@ -219,7 +219,7 @@ cast receipt <交易哈希> --rpc-url $RPC
 
 实施步骤：
 
-1. 在仓库根目录运行 forge init contracts，在 contracts 目录内安装 OpenZeppelin Contracts 并配置 remappings。本阶段的命令都在 contracts 目录中执行。
+1. 在仓库根目录运行 forge init contracts --no-git（仓库已由外层 git 管理，避免生成嵌套仓库），进入 contracts 目录运行 forge install OpenZeppelin/openzeppelin-contracts，删除示例文件 Counter.sol、Counter.t.sol、Counter.s.sol。forge 会自动识别 @openzeppelin/contracts/ 导入路径，无需手写 remappings。本阶段的命令都在 contracts 目录中执行。
 2. 按 4.1 节编写 Payment.sol：pay 收款并发出事件，withdraw 由所有者提现。
 3. 编写 Deploy.s.sol，用账户 0 部署到 Anvil，记录合约地址和部署区块号。
 4. 编写 Payment.t.sol，覆盖下表中的测试场景。
@@ -241,13 +241,16 @@ cast receipt <交易哈希> --rpc-url $RPC
 export OWNER_PK=<Anvil 日志中账户 0 的私钥>
 
 cd contracts
-forge script script/Deploy.s.sol --rpc-url $RPC --broadcast --private-key $OWNER_PK
+forge script script/Deploy.s.sol --rpc-url $RPC --broadcast
+# 部署脚本从环境变量 OWNER_PK 读取私钥，并把该账户设为合约所有者
+# 新启动的 Anvil 上，账户 0 部署的第一个合约地址固定为 0x5FbDB2315678afecb367f032d93F642f64180aa3
 # 合约地址和部署区块号可在 contracts/broadcast/Deploy.s.sol/31337/run-latest.json 中找到
 export CONTRACT=<部署输出的合约地址>
 
 ORDER_ID=$(cast keccak "demo-order-1")
 cast send $CONTRACT "pay(bytes32)" $ORDER_ID --value 0.01ether --private-key $USER_PK --rpc-url $RPC
-cast logs --address $CONTRACT --from-block 0 "OrderPaid(bytes32,address,uint256)" --rpc-url $RPC
+# 事件签名要写明 indexed，cast 才能把 topics 解码成字段
+cast logs --address $CONTRACT --from-block 0 "OrderPaid(bytes32 indexed orderId, address indexed payer, uint256 amount)" --rpc-url $RPC
 cast balance $CONTRACT --ether --rpc-url $RPC
 ```
 
@@ -455,12 +458,36 @@ contract Payment is Ownable, ReentrancyGuard {
         emit OrderPaid(orderId, msg.sender, msg.value);
     }
 
-    function withdraw(address payable to, uint256 amount) external onlyOwner nonReentrant {
+    function withdraw(address payable to, uint256 amount) external nonReentrant onlyOwner {
         if (to == address(0)) revert InvalidRecipient();
         if (amount > address(this).balance) revert InsufficientBalance();
+        emit Withdrawn(to, amount);
         (bool ok, ) = to.call{value: amount}("");
         if (!ok) revert TransferFailed();
-        emit Withdrawn(to, amount);
+    }
+}
+```
+
+部署脚本 script/Deploy.s.sol：
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+import {Script, console} from "forge-std/Script.sol";
+import {Payment} from "../src/Payment.sol";
+
+contract Deploy is Script {
+    function run() external returns (Payment payment) {
+        uint256 ownerKey = vm.envUint("OWNER_PK");
+        address owner = vm.addr(ownerKey);
+
+        vm.startBroadcast(ownerKey);
+        payment = new Payment(owner);
+        vm.stopBroadcast();
+
+        console.log("Payment deployed at:", address(payment));
+        console.log("Owner:", owner);
     }
 }
 ```
@@ -469,6 +496,7 @@ contract Payment is Ownable, ReentrancyGuard {
 
 - 合约不定义 receive 和 fallback，直接向合约转账会被拒绝，避免出现无法对应订单的款项。
 - 合约不在链上记录订单是否已付款。金额、到期和重复付款都由后端判断，异常付款进入人工处理。这样合约极简，也避免了"他人抢先用错误金额付款、占用订单编号"的问题。
+- withdraw 按"检查 → 记录 → 外部调用"的顺序编写：先校验参数、发出事件，最后才转账；nonReentrant 放在第一个修饰符位置。这是 forge 代码检查推荐的写法。
 - 使用自定义错误而不是字符串，节省 Gas，前端也能解析出具体错误名称。
 - 合约余额不能作为订单支付证据；付款证据只有本合约发出的 OrderPaid 事件。
 
@@ -667,7 +695,6 @@ web3/
 │   ├── test/Payment.t.sol
 │   ├── lib/openzeppelin-contracts/
 │   ├── foundry.toml
-│   └── remappings.txt
 ├── backend/
 │   ├── app/
 │   │   ├── main.py                 已有：应用入口、/health
@@ -675,37 +702,39 @@ web3/
 │   │   ├── core/config.py          已有：从根目录 .env 读取全部配置，由 PGSQL_* 拼出连接串
 │   │   ├── api/v1/
 │   │   │   ├── config.py           已有：GET /api/v1/config
-│   │   │   ├── products.py         阶段 3
-│   │   │   └── orders.py           阶段 3
-│   │   ├── models/                 阶段 3：orders、payments、scan_cursors
-│   │   ├── schemas/                阶段 3：请求与响应模型
+│   │   │   ├── products.py         已有：GET /api/v1/products
+│   │   │   └── orders.py           已有：创建、查询订单，记录交易哈希
+│   │   ├── models/                 已有：orders、payments、scan_cursors
+│   │   ├── schemas/                已有：order.py 请求与响应模型
 │   │   ├── services/
-│   │   │   ├── chain.py            已有：web3 连接；阶段 2 加入合约对象与事件读取
-│   │   │   ├── orders.py           阶段 3
-│   │   │   └── payments.py         阶段 2：verify_payment_tx、classify_payment
+│   │   │   ├── chain.py            已有：web3 连接、合约对象、部署检查
+│   │   │   ├── orders.py           已有：订单业务
+│   │   │   ├── products.py         已有：商品与服务端定价
+│   │   │   └── payments.py         已有：verify_payment_tx、fetch_paid_events、classify_payment
 │   │   ├── jobs/
-│   │   │   ├── scan_payments.py    阶段 3
+│   │   │   ├── scan_payments.py    已有：scan_once 与 --once 命令
 │   │   │   └── expire_orders.py    阶段 5
-│   │   └── worker.py               阶段 4
-│   ├── alembic/                    已有：已接入 app 配置与 Base.metadata
-│   ├── abi/Payment.json            阶段 2 由脚本导出
-│   ├── tests/                      已有：conftest.py、test_config.py
+│   │   ├── worker.py               已有：常驻循环扫描
+│   │   └── cli.py                  已有：链上调试命令 check、verify、events
+│   ├── alembic/                    已有：初始迁移建立三张表
+│   ├── abi/Payment.json            已有：由 scripts/export_abi.py 导出
+│   ├── tests/                      已有：配置、付款分类、订单接口与扫描测试
 │   ├── alembic.ini                 已有
 │   └── Dockerfile.backend          已有
 ├── frontend/                       已有：React + TypeScript + Vite，已安装 ethers v6
 │   ├── src/
-│   │   ├── App.tsx                 已有：占位页面
-│   │   ├── pages/                  阶段 4
-│   │   ├── components/             阶段 4
-│   │   ├── hooks/useWallet.ts      阶段 4
-│   │   ├── services/api.ts         阶段 4
-│   │   ├── services/payment.ts     阶段 4
-│   │   └── abi/Payment.json        阶段 2 由脚本导出
+│   │   ├── App.tsx                 已有：页面切换，订单号保存在 URL
+│   │   ├── pages/                  已有：ProductPage、OrderPage
+│   │   ├── components/             已有：WalletConnect、PaymentStatus
+│   │   ├── hooks/useWallet.ts      已有：钱包账户与网络状态
+│   │   ├── services/api.ts         已有：后端 API 客户端
+│   │   ├── services/payment.ts     已有：调用 pay 与错误提示
+│   │   └── abi/Payment.json        已有：由 scripts/export_abi.py 导出
 │   ├── vite.config.ts              已有：/api 代理到 127.0.0.1:8000
 │   ├── nginx.conf                  已有：部署时转发 /api/ 到后端
 │   ├── Dockerfile.frontend         已有
 │   └── package.json
-├── scripts/export_abi.py           阶段 2
+├── scripts/export_abi.py           已有：把 ABI 导出到前后端
 ├── docker-compose.yml              已有：postgres；backend、frontend 在 app 配置组中
 ├── .env.example                    已有：配置模板，复制为 .env 后填写
 ├── requirements.txt                已有：唯一的 Python 依赖清单，本机安装与 Docker 构建共用
@@ -713,7 +742,7 @@ web3/
 └── README.md
 ```
 
-contracts/remappings.txt 写入 @openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/。ABI 从 Foundry 编译产物统一导出给前后端，不手工维护两份不同版本。Node 使用 package-lock.json 锁定依赖；Python 依赖统一写在根目录 requirements.txt 中，目前是版本范围，确定可用版本后可用 pip freeze 生成锁定文件。web3.py 固定在 7.x，与本文的代码示例一致。
+OpenZeppelin 以 git 子模块形式安装在 contracts/lib/ 下，克隆仓库后需执行 git submodule update --init --recursive；forge 自动识别其导入路径。ABI 从 Foundry 编译产物统一导出给前后端，不手工维护两份不同版本。Node 使用 package-lock.json 锁定依赖；Python 依赖统一写在根目录 requirements.txt 中，目前是版本范围，确定可用版本后可用 pip freeze 生成锁定文件。web3.py 固定在 7.x，与本文的代码示例一致。
 
 ### 9.2 配置
 
@@ -755,7 +784,7 @@ docker compose up -d postgres
 
 # contracts 目录（阶段 1）
 forge test
-forge script script/Deploy.s.sol --rpc-url $RPC --broadcast --private-key $OWNER_PK
+forge script script/Deploy.s.sol --rpc-url $RPC --broadcast   # 需先 export OWNER_PK
 
 # 仓库根目录（阶段 2）
 python scripts/export_abi.py
